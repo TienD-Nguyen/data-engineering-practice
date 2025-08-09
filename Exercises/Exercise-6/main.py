@@ -1,4 +1,4 @@
-from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql.types import StructType
 import pyspark.sql.functions as psf
 import os
@@ -97,7 +97,7 @@ class AnsweringService:
         self.spark = spark
 
     def question_one_solution(self, file_path: str):
-        logger.info("Answering Question 1")
+        logger.info("Answering Question 1 - What is the `average` trip duration per day?")
         sdf = self.spark_df
         if self.dataset_name == "Divvy_Trips_2020_Q1.csv":
             sdf = sdf.select("*", (psf.unix_timestamp(psf.to_timestamp("ended_at")) - psf.unix_timestamp(psf.to_timestamp("started_at"))).alias("tripduration"))
@@ -111,7 +111,7 @@ class AnsweringService:
             result_df.repartition(1).write.mode("overwrite").csv(file_path, header=True)
 
     def question_two_solution(self, file_path: str):
-        logger.info("Answering Question 2")
+        logger.info("Answering Question 2 - How many trips were taken each day?")
         sdf = self.spark_df
         result_df = sdf.groupBy("date").count()
 
@@ -126,7 +126,7 @@ class AnsweringService:
             result_df.repartition(1).write.mode("overwrite").csv(file_path, header=True)
 
     def question_three_solution(self, file_path: str):
-        logger.info("Answering Question 3")
+        logger.info("Answering Question 3 - What was the most popular starting trip station for each month?")
 
         try:
             result_df = self.spark_df.select("*",
@@ -155,13 +155,40 @@ class AnsweringService:
             result_df.repartition(1).write.mode("overwrite").csv(file_path, header=True)
 
     def question_four_solution(self, file_path: str):
-        pass
+        logger.info("Answering Question 4 - What were the top 3 trip stations each day for the last two weeks?")
+
+        if self.dataset_name == "Divvy_Trips_2020_Q1.csv":
+            window = Window.partitionBy("date").orderBy("count")
+            date_cutoff = self.spark_df.select(
+                psf.date_add(psf.max("date"), -14).alias("max_date")).collect()[0]["max_date"]
+
+            self.spark_df.where(psf.col("date") >= date_cutoff)\
+                .groupby("date", "start_station_name")\
+                    .count()\
+                        .withColumn("rank", psf.row_number().over(window))\
+                            .where(psf.col("rank") <= 3)\
+                                .write.mode("overide").csv(file_path, header=True)
 
     def question_five_solution(self, file_path: str):
-        pass
+        logger.info("Answering Question 5 - Do `Male`s or `Female`s take longer trips on average?")
+
+        if self.dataset_name == "Divvy_Trips_2019_Q4.csv":
+            self.spark_df.dropna(subset=["tripduration", "gender"]).groupby("gender").agg(
+                psf.mean("tripduration").alias("avg_tripduration")
+            ).selectExpr("max_by(gender, avg_tripduration) as longest_trip_takers")\
+            .repartition(1)\
+            .write.mode("overwrite").csv(file_path, header=True)
 
     def question_six_solution(self, file_path: str):
-        pass
+        logger.info("Answering Question 6 - What is the top 10 ages of those that take the longest trips, and shortest?")
+
+        if self.dataset_name == "Divvy_Trips_2019_Q4.csv":
+            self.spark_df.orderBy(psf.desc("tripduration")).dropna(subset=["birthyear"])\
+                .limit(10)\
+                    .select((2025 - psf.col("birthyear")).alias("age"))\
+                        .repartition(1)\
+                        .write.mode("overwrite")\
+                        .csv(file_path, header=True)
 
 #-----Exploratory function-----
 def read_csv_from_zip(zip_path: str, csv_filename=None):
