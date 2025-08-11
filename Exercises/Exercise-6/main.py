@@ -1,5 +1,5 @@
 from pyspark.sql import DataFrame, SparkSession, Window
-from pyspark.sql.types import StructType
+from pyspark.sql.types import LongType
 import pyspark.sql.functions as psf
 import os
 import zipfile
@@ -33,7 +33,7 @@ def create_directory(directory: str):
     if not os.path.exists(path):
         logger.info(f'No directory exists for {directory}. Creating one in current work directory.')
         os.makedirs(name=path, exist_ok=True)
-    log_info(f"The directory is exist.")
+    logger.info(f"The directory is exist.")
     return path
 
 def safe_decode(byte_content: bytes):
@@ -101,13 +101,15 @@ class AnsweringService:
         sdf = self.spark_df
         if self.dataset_name == "Divvy_Trips_2020_Q1.csv":
             sdf = sdf.select("*", (psf.unix_timestamp(psf.to_timestamp("ended_at")) - psf.unix_timestamp(psf.to_timestamp("started_at"))).alias("tripduration"))
+
+        sdf = sdf.withColumn("tripduration", psf.regexp_replace(psf.col("tripduration"), ",", "").cast("double"))    
         result_df = sdf.groupby("date").agg(psf.mean("tripduration").alias("average_trip_duration"))
 
         if os.path.exists(file_path):
             logger.info(f"{os.path.basename(file_path)} exists. Appending contents into the file.")
             result_df.repartition(1).write.mode("append").csv(file_path, header=True)
         else:
-            logger.info(f"{os.path.basename} does not exist. Creating and writing the contents into the file.")
+            logger.info(f"{os.path.basename(file_path)} does not exist. Creating and writing the contents into the file.")
             result_df.repartition(1).write.mode("overwrite").csv(file_path, header=True)
 
     def question_two_solution(self, file_path: str):
@@ -128,21 +130,17 @@ class AnsweringService:
     def question_three_solution(self, file_path: str):
         logger.info("Answering Question 3 - What was the most popular starting trip station for each month?")
 
-        try:
-            result_df = self.spark_df.select("*",
-                                            psf.col(*{"start_station_id", "from_station_id"} & set(self.spark_df.columns)).alias("start_location"),
-                                            *[func(psf.col(x)).alias(y)
-                                            for x, y, func in zip(
-                                                ["date", "date"], ["year", "month"], [psf.year, psf.month]
-                                            )]
-            )\
-            .groupby("year", "month", "start_location")\
-            .count().orderBy(["year", "month", "count"], ascending=True)\
-            .groupby("year", "month")\
-            .agg(psf.first("start_location").alias("most_popular_start_location"))
-        except Exception as e:
-            logger.error(f"An error has occured: {e}. Exiting...")
-            sys.exit()
+        result_df = self.spark_df.select("*",
+                                        psf.col(*{"start_station_id", "from_station_id"} & set(self.spark_df.columns)).alias("start_location"),
+                                        *[func(psf.col(x)).alias(y)
+                                        for x, y, func in zip(
+                                            ["date", "date"], ["year", "month"], [psf.year, psf.month]
+                                        )]
+        )\
+        .groupby("year", "month", "start_location")\
+        .count().orderBy(["year", "month", "count"], ascending=True)\
+        .groupby("year", "month")\
+        .agg(psf.first("start_location").alias("most_popular_start_location"))
 
         if os.path.exists(file_path):
             logger.info(f"{os.path.basename} exists. Combining results.")
@@ -175,7 +173,8 @@ class AnsweringService:
         if self.dataset_name == "Divvy_Trips_2019_Q4.csv":
             self.spark_df.dropna(subset=["tripduration", "gender"]).groupby("gender").agg(
                 psf.mean("tripduration").alias("avg_tripduration")
-            ).selectExpr("max_by(gender, avg_tripduration) as longest_trip_takers")\
+            )\
+            .selectExpr("max_by(gender, avg_tripduration) as longest_trip_takers")\
             .repartition(1)\
             .write.mode("overwrite").csv(file_path, header=True)
 
@@ -236,24 +235,20 @@ def main():
     spark = SparkSession.builder.appName("Exercise6").enableHiveSupport().getOrCreate()
     zip_files = retrieve_zip_file_name(os.path.join(os.getcwd(), "data"))
     dfs = read_data_into_spark(zip_file_paths=zip_files, sc=spark)
-    # print(type(dfs))
-    # print(dfs)
 
-    # for frame in read_zip_content_into_memory(zip_path):
-    #     sdf = create_spark_dataframe_from_memory(frame.decode("utf-8").splitlines(), spark, header=True)
-    #     print(sdf.head())
-    
-
-    # try:
-    #     zip_files = retrieve_zip_file_name(os.path.join(os.getcwd(), "data"))
-    #     trips_df = read_csv_from_zip_files(spark=spark, zip_file_paths=zip_files)
-    #     trips_df.show(5)
-    #     trips_df.printSchema()
-    # except Exception as e:
-    #     log_error(f"An error has occured: {e}")
-    # finally:
-    #     spark.stop()
-
+    try:
+        for spark_df, dataset_name in zip(dfs.values(), dfs.keys()):
+            answering_service = AnsweringService(spark_df=spark_df, dataset_name=dataset_name, spark=spark)
+            answering_service.question_one_solution(f"{report_dir}/question1.csv")
+            answering_service.question_two_solution(f"{report_dir}/question2.csv")
+            answering_service.question_three_solution(f"{report_dir}/question3.csv")
+            answering_service.question_four_solution(f"{report_dir}/question4.csv")
+            answering_service.question_five_solution(f"{report_dir}/question5.csv")
+            answering_service.question_six_solution(f"{report_dir}/question6.csv")
+    except Exception as e:
+        logger.error(f"An error has occured: {e}")
+    finally:
+        spark.stop()
 
 if __name__ == "__main__":
     main()
