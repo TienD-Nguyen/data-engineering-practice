@@ -169,6 +169,9 @@ class AnsweringService:
                         .withColumn("rank", psf.row_number().over(window))\
                             .where(psf.col("rank") <= 3)\
                                 .write.mode("overwrite").csv(file_path, header=True)
+        else:
+            logger.info(f"The required data does not exist in {self.dataset_name}. Continuing to the next step")
+            return
 
     def question_five_solution(self, file_path: str):
         logger.info("Answering Question 5 - Do `Male`s or `Female`s take longer trips on average?")
@@ -181,6 +184,9 @@ class AnsweringService:
             .selectExpr("max_by(gender, avg_tripduration) as longest_trip_takers")\
             .repartition(1)\
             .write.mode("overwrite").csv(file_path, header=True)
+        else:
+            logger.info(f"The required data does not exist in {self.dataset_name}. Continuing to the next step")
+            return
 
     def question_six_solution(self, file_path: str):
         logger.info("Answering Question 6 - What is the top 10 ages of those that take the longest trips, and shortest?")
@@ -193,6 +199,9 @@ class AnsweringService:
                         .repartition(1)\
                         .write.mode("overwrite")\
                         .csv(file_path, header=True)
+        else:
+            logger.info(f"The required data does not exist in {self.dataset_name}. Continuing to the next step")
+            return
 
 #-----Exploratory function-----
 def read_csv_from_zip(zip_path: str, csv_filename=None):
