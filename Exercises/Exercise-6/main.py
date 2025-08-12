@@ -103,7 +103,7 @@ class AnsweringService:
             sdf = sdf.select("*", (psf.unix_timestamp(psf.to_timestamp("ended_at")) - psf.unix_timestamp(psf.to_timestamp("started_at"))).alias("tripduration"))
 
         sdf = sdf.withColumn("tripduration", psf.regexp_replace(psf.col("tripduration"), ",", "").cast("double"))    
-        result_df = sdf.groupby("date").agg(psf.mean("tripduration").alias("average_trip_duration"))
+        result_df = sdf.groupby("date").agg(psf.round(psf.mean("tripduration"), 2).alias("average_trip_duration"))
 
         if os.path.exists(file_path):
             logger.info(f"{os.path.basename(file_path)} exists. Appending contents into the file.")
@@ -118,38 +118,41 @@ class AnsweringService:
         result_df = sdf.groupBy("date").count()
 
         if os.path.exists(file_path):
-            logger.info(f"{os.path.basename} exists. Combining results.")
+            logger.info(f"{os.path.basename(file_path)} exists. Combining results.")
             existing_df = self.spark.read.csv(file_path, header=True)
             existing_df.cache().count()
             result_df.cache().count()
             existing_df.unionByName(result_df).repartition(1).write.mode("overwrite").csv(file_path, header=True)
         else:
-            logger.info(f"{os.path.basename} does not exist. Creating and writing contens into the file.")
+            logger.info(f"{os.path.basename(file_path)} does not exist. Creating and writing contens into the file.")
             result_df.repartition(1).write.mode("overwrite").csv(file_path, header=True)
 
     def question_three_solution(self, file_path: str):
         logger.info("Answering Question 3 - What was the most popular starting trip station for each month?")
 
-        result_df = self.spark_df.select("*",
-                                        psf.col(*{"start_station_id", "from_station_id"} & set(self.spark_df.columns)).alias("start_location"),
+        monthly_count = self.spark_df.select("*",
+                                        psf.col(*{"start_station_id", "from_station_id"} & set(self.spark_df.columns)).alias("start_location_id"),
+                                        psf.col(*{"start_station_name", "from_station_name"} & set(self.spark_df.columns)).alias("start_location_name"),
                                         *[func(psf.col(x)).alias(y)
                                         for x, y, func in zip(
                                             ["date", "date"], ["year", "month"], [psf.year, psf.month]
                                         )]
         )\
-        .groupby("year", "month", "start_location")\
-        .count().orderBy(["year", "month", "count"], ascending=True)\
-        .groupby("year", "month")\
-        .agg(psf.first("start_location").alias("most_popular_start_location"))
+        .groupby("year", "month", "start_location_id", "start_location_name")\
+        .agg(psf.count("*").alias("trip_count"))
+
+        window_spec = Window.partitionBy("year", "month").orderBy(psf.desc("trip_count"))
+        ranked_df = monthly_count.withColumn("rank", psf.rank().over(window_spec))
+        result_df = ranked_df.filter(psf.col("rank") == 1).drop("rank")
 
         if os.path.exists(file_path):
-            logger.info(f"{os.path.basename} exists. Combining results.")
+            logger.info(f"'{os.path.basename(file_path)}' exists. Combining results.")
             existing_df = self.spark.read.csv(file_path, header=True)
             existing_df.cache().count()
             result_df.cache().count()
             existing_df.unionByName(result_df).repartition(1).write.mode("overwrite").csv(file_path, header=True)
         else:
-            logger.info(f"{os.path.basename} does not exist. Creating and writing contens into the file.")
+            logger.info(f"'{os.path.basename(file_path)}' does not exist. Creating and writing contens into the file.")
             result_df.repartition(1).write.mode("overwrite").csv(file_path, header=True)
 
     def question_four_solution(self, file_path: str):
@@ -165,14 +168,15 @@ class AnsweringService:
                     .count()\
                         .withColumn("rank", psf.row_number().over(window))\
                             .where(psf.col("rank") <= 3)\
-                                .write.mode("overide").csv(file_path, header=True)
+                                .write.mode("overwrite").csv(file_path, header=True)
 
     def question_five_solution(self, file_path: str):
         logger.info("Answering Question 5 - Do `Male`s or `Female`s take longer trips on average?")
 
         if self.dataset_name == "Divvy_Trips_2019_Q4.csv":
-            self.spark_df.dropna(subset=["tripduration", "gender"]).groupby("gender").agg(
-                psf.mean("tripduration").alias("avg_tripduration")
+            sdf = self.spark_df.withColumn("tripduration", psf.regexp_replace(psf.col("tripduration"), ",", "").cast("double"))
+            sdf.dropna(subset=["tripduration", "gender"]).groupby("gender").agg(
+                psf.round(psf.mean("tripduration"), 2).alias("avg_tripduration")
             )\
             .selectExpr("max_by(gender, avg_tripduration) as longest_trip_takers")\
             .repartition(1)\
@@ -182,9 +186,10 @@ class AnsweringService:
         logger.info("Answering Question 6 - What is the top 10 ages of those that take the longest trips, and shortest?")
 
         if self.dataset_name == "Divvy_Trips_2019_Q4.csv":
-            self.spark_df.orderBy(psf.desc("tripduration")).dropna(subset=["birthyear"])\
+            sdf = self.spark_df.withColumn("tripduration", psf.regexp_replace(psf.col("tripduration"), ",", "").cast("double"))
+            sdf.orderBy(psf.desc("tripduration")).dropna(subset=["birthyear"])\
                 .limit(10)\
-                    .select((2025 - psf.col("birthyear")).alias("age"))\
+                    .select((2025 - psf.col("birthyear")).alias("age"), psf.col("tripduration"))\
                         .repartition(1)\
                         .write.mode("overwrite")\
                         .csv(file_path, header=True)
