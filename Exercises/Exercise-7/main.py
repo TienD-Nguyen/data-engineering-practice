@@ -1,4 +1,4 @@
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, Window
 import pyspark.sql.functions as psf
 import logging
 import zipfile
@@ -39,7 +39,7 @@ def read_zip_content_into_memory(zip_file: str):
                     return [BytesIO(f.read())]
         return [zip_ref.read(x) for x in zip_ref.namelist() if re.fullmatch(r"[^/]*\.csv", x)]
 
-def create_spark_dataframe_from_memory(csv_io: BytesIO | bytes, sc: SparkSession, header: bool, infer_schema: bool):
+def create_spark_dataframe_from_memory(csv_io: BytesIO, sc: SparkSession, header: bool, infer_schema: bool):
     csv_io.seek(0)
     csv_bytes = csv_io.read()
     csv_str = safe_decode(csv_bytes)
@@ -60,10 +60,24 @@ def main():
         zip_io_content = read_zip_content_into_memory(zip_path)[0]
         spark_df = create_spark_dataframe_from_memory(zip_io_content, sc=spark, header=True, infer_schema=True)
         
-        modified_df = spark_df.withColumn("source_file", psf.lit(zip_filename))
+        # Add columns based on the task's requirement
+        spark_df = spark_df.withColumn("source_file", psf.lit(zip_filename))\
+            .withColumn("file_date", psf.to_date(psf.regexp_extract("source_file", r"(\d{4}-\d{2}-\d{2})", 1)))\
+            .withColumn("brand", psf.when(psf.size(psf.split("model", " ")) > 1, psf.split("model", " ")[0]).otherwise("unknown"))
 
-        print(modified_df.columns)
-    
+        # Create additional dataframe for ranking of models' storage
+        temp_df = spark_df.select(["model", "capacity_bytes"])\
+            .withColumn("model", psf.regexp_replace("model", r"\s{2,}", r"\s"))\
+            .withColumn("capacity_bytes", psf.col("capacity_bytes").astype("long"))\
+            .drop_duplicates()\
+            .withColumn("storage_ranking", psf.dense_rank().over(Window.orderBy(psf.col("capacity_bytes").desc())))
+        
+        # Join dataframe on "model" and proceed with the last task of creating "primary key"
+        spark_df = spark_df.join(temp_df.select(["model", "storage_ranking"]), on="model", how="left")\
+            .withColumn("primary_key", psf.hash("model", "serial_number"))
+
+        spark_df.select(["date", "serial_number", "model", "capacity_bytes", "failure", "source_file", "file_date", "brand", "storage_ranking", "primary_key"]).show()
+
     # your code here
 
 
