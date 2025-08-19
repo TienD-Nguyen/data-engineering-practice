@@ -30,14 +30,16 @@ def safe_decode(byte_content: bytes):
 
 #-----Data Loading Functions-----
 def read_zip_content_into_memory(zip_file: str):
+    contents = []
     with zipfile.ZipFile(zip_file, "r") as zip_ref:
         for name in zip_ref.namelist():
             if name.startswith("__MACOSX") or name.endswith(".DS_Store") or "/._" in name:
                 continue
             if name.endswith(".csv"):
                 with zip_ref.open(name) as f:
-                    return [BytesIO(f.read())]
-        return [zip_ref.read(x) for x in zip_ref.namelist() if re.fullmatch(r"[^/]*\.csv", x)]
+                    contents.append(BytesIO(f.read()))
+    return contents
+        # return [zip_ref.read(x) for x in zip_ref.namelist() if re.fullmatch(r"[^/]*\.csv", x)]
 
 def create_spark_dataframe_from_memory(csv_io: BytesIO, sc: SparkSession, header: bool, infer_schema: bool):
     csv_io.seek(0)
