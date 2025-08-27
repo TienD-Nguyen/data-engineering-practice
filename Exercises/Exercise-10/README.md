@@ -34,7 +34,7 @@ and long trip durations. It's expected that most bike trips start and end on the
 implement a Data Quality alert that will let us know when we are getting erroneous durations in ride times.
 
 1. Use Great Expectations to satisfy this requirement.
-2. The current dataset includes erroneous trip lenghts, when you run this pipeline (using `docker-compose up run`) 
+2. The current dataset includes erroneous trip lengths, when you run this pipeline (using `docker-compose up run`) 
 your data quality checks should pick up on this.
 
 

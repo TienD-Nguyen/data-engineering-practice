@@ -1,3 +1,6 @@
+import great_expectations as gx
+from data_quality_pipeline import BikeTripsDataQualityPipeline
+import os
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col,
@@ -36,29 +39,32 @@ schema = StructType([
 
 input_csv_path = "data/202306-divvy-tripdata.csv"
 
-df = spark.read.csv(
+spark_df = spark.read.csv(
     input_csv_path,
     header=True,
     schema=schema,
     mode="DROPMALFORMED"
 )
 
-df = df.withColumn(
+spark_df = spark_df.withColumn(
     "started_at", to_timestamp(col("started_at"), "yyyy-MM-dd HH:mm:ss")
 ).withColumn(
     "ended_at", to_timestamp(col("ended_at"), "yyyy-MM-dd HH:mm:ss")
 )
 
-df = df.withColumn(
+spark_df = spark_df.withColumn(
     "duration_seconds",
     unix_timestamp(col("ended_at")) - unix_timestamp(col("started_at"))
 )
 
-df = df.withColumn(
+spark_df = spark_df.withColumn(
     "date", date_format(col("started_at"), "yyyy-MM-dd")
 )
 
-daily_durations = df.groupBy("date").agg(
+data_validation_pipeline = BikeTripsDataQualityPipeline(dataframe=spark_df)
+data_validation_pipeline.validate()
+
+daily_durations = spark_df.groupBy("date").agg(
     _sum("duration_seconds").alias("total_duration_seconds")
 )
 
