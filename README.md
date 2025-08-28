@@ -1,6 +1,6 @@
 ## Data Engineering Practice Problems ##
 
-This repository contains my attempts to resolve the amazing data engineer exercises posted by Daniel Beach [danielbeach/data-engineering-practice](https://github.com/danielbeach/data-engineering-practice/).
+This repository contains my attempts to resolve the amazing data engineer exercises posted by Daniel Beach [danielbeach/data-engineering-practice](https://github.com/danielbeach/data-engineering-practice/), in collaboration with GenAI models (ChatGPT & Claude)
 
 To execute the solutions contained within this directory, each respective folder will either:
 
